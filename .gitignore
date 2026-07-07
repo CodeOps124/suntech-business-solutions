@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Local databases & generated sample data
+*.sqlite3
+dashboard/data/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
