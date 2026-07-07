@@ -1,0 +1,30 @@
+{
+  "_comment": "RLS rules dataset. QuickSight matches the logged-in user's UserName against the UserName column and restricts the main dataset to the matching tenant_id values. Built on reporting.v_rls_rules, which fans group-level grants out to member tenants. A P&L lead with group access transparently sees every tenant in that group; a restricted user sees only their listed tenant(s). Admins/full-access principals are simply absent from this table -> with GRANT_ACCESS policy they must be added explicitly, OR use a dedicated admin dataset without RLS (see docs/SECURITY_CHECKLIST.md).",
+  "AwsAccountId": "REPLACE_WITH_ACCOUNT_ID",
+  "DataSetId": "suntech-pnl-rls-rules",
+  "Name": "Suntech P&L - RLS Rules",
+  "ImportMode": "SPICE",
+  "PhysicalTableMap": {
+    "rls-physical": {
+      "CustomSql": {
+        "DataSourceArn": "arn:aws:quicksight:me-central-1:REPLACE_WITH_ACCOUNT_ID:datasource/suntech-reporting-postgres",
+        "Name": "v_rls_rules",
+        "SqlQuery": "SELECT \"UserName\", tenant_id FROM reporting.v_rls_rules",
+        "Columns": [
+          {"Name": "UserName", "Type": "STRING"},
+          {"Name": "tenant_id", "Type": "STRING"}
+        ]
+      }
+    }
+  },
+  "LogicalTableMap": {
+    "rls-logical": {
+      "Alias": "RlsRules",
+      "Source": {"PhysicalTableId": "rls-physical"}
+    }
+  },
+  "Tags": [
+    {"Key": "project", "Value": "pnl-invoice-analytics"},
+    {"Key": "data-classification", "Value": "access-control"}
+  ]
+}

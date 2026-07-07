@@ -1,0 +1,25 @@
+{
+  "_comment": "QuickSight data source pointing at the reporting Postgres replica. Lives in a PRIVATE subnet (no public endpoint) reached via a QuickSight VPC connection; credentials come from Secrets Manager (CredentialPair is shown for shape but production should use SecretArn). Region pinned to me-central-1 (UAE/Dubai) for data residency (PROJECT_OVERVIEW.md). Shape matches: aws quicksight create-data-source.",
+  "AwsAccountId": "REPLACE_WITH_ACCOUNT_ID",
+  "DataSourceId": "suntech-reporting-postgres",
+  "Name": "Suntech Reporting (Postgres replica)",
+  "Type": "POSTGRESQL",
+  "DataSourceParameters": {
+    "PostgreSqlParameters": {
+      "Host": "REPLACE_WITH_PRIVATE_RDS_ENDPOINT",
+      "Port": 5432,
+      "Database": "reporting"
+    }
+  },
+  "Credentials": {
+    "SecretArn": "arn:aws:secretsmanager:me-central-1:REPLACE_WITH_ACCOUNT_ID:secret:suntech/pnl/quicksight-reader"
+  },
+  "VpcConnectionProperties": {
+    "VpcConnectionArn": "arn:aws:quicksight:me-central-1:REPLACE_WITH_ACCOUNT_ID:vpcConnection/suntech-pnl-vpc"
+  },
+  "SslProperties": {"DisableSsl": false},
+  "Tags": [
+    {"Key": "project", "Value": "pnl-invoice-analytics"},
+    {"Key": "data-classification", "Value": "client-regulated"}
+  ]
+}

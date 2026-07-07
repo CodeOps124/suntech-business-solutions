@@ -1,0 +1,314 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Suntech P&L Invoice Analytics — daily refresh pipeline and security baseline.
+  EventBridge Scheduler (daily cron) -> Step Functions (extract->transform->load)
+  -> QuickSight CreateIngestion (SPICE refresh). Any failure -> SNS -> Slack+email.
+  Implements PROJECT_OVERVIEW.md "Architecture & Automation" + "Security & Compliance".
+  Region MUST be me-central-1 (UAE/Dubai) for data residency.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: suntech-pnl
+  QuickSightAccountId:
+    Type: String
+    Description: AWS account id hosting QuickSight.
+  MainDataSetId:
+    Type: String
+    Default: suntech-pnl-invoice-detail
+  RlsDataSetId:
+    Type: String
+    Default: suntech-pnl-rls-rules
+  EtlImageUri:
+    Type: String
+    Description: ECR image URI for the ETL container (runs etl_transform.py).
+  AlertEmail:
+    Type: String
+    Description: Email subscribed to failure alerts.
+  PrivateSubnetIdsJson:
+    Type: String
+    Description: >
+      Private subnets (no IGW route) for the ETL task, as a JSON array string,
+      e.g. ["subnet-aaa","subnet-bbb"]. Passed verbatim into the Step Functions
+      ASL NetworkConfiguration. Render with scripts/render_subnets.sh.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 2 * * ? *)"   # 02:00 daily (Dubai time set on the schedule)
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Alerting: SNS topic -> email (+ wire Slack via a chatbot/Lambda subscriber).
+  # ---------------------------------------------------------------------------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-refresh-alerts"
+      KmsMasterKeyId: alias/aws/sns
+
+  AlertEmailSub:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ---------------------------------------------------------------------------
+  # Secrets: source replica (read-only) + reporting (write) creds.
+  # Values are populated out-of-band; only the containers are created here.
+  # ---------------------------------------------------------------------------
+  SourceSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/source-replica-reader"
+      Description: Read-only credentials for the TCA source replica.
+  TargetSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/reporting-writer"
+      Description: Write credentials for the reporting schema.
+
+  # ---------------------------------------------------------------------------
+  # ECS Fargate task to run the ETL transform in private subnets.
+  # ---------------------------------------------------------------------------
+  EtlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}-etl"
+      RetentionInDays: 90
+
+  EtlSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ETL task egress only (to RDS + AWS APIs via endpoints).
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/8
+          Description: Postgres to source replica + reporting (private).
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to AWS service endpoints.
+
+  EtlCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${ProjectName}-etl"
+
+  # Least-privilege: the ETL EXECUTION role can pull the image + write logs.
+  EtlExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # The ETL TASK role: read-only source secret + write reporting secret only.
+  EtlTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: etl-least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadBothSecrets
+                Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource:
+                  - !Ref SourceSecret
+                  - !Ref TargetSecret
+              # NOTE: DB-level enforcement is the real guarantee — the source DB
+              # role is read-only, the reporting DB role is write-only. IAM here
+              # only scopes which secrets the task may read.
+
+  EtlTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-etl"
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt EtlExecutionRole.Arn
+      TaskRoleArn: !GetAtt EtlTaskRole.Arn
+      ContainerDefinitions:
+        - Name: etl
+          Image: !Ref EtlImageUri
+          Essential: true
+          Environment:
+            - {Name: SOURCE_SECRET_ID, Value: !Ref SourceSecret}
+            - {Name: TARGET_SECRET_ID, Value: !Ref TargetSecret}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref EtlLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: etl
+
+  # ---------------------------------------------------------------------------
+  # Step Functions state machine: run ETL task, then SPICE ingest, alert on fail.
+  # ---------------------------------------------------------------------------
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: states.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: sfn-pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ecs:RunTask]
+                Resource: !Ref EtlTaskDefinition
+              - Effect: Allow
+                Action: [ecs:StopTask, ecs:DescribeTasks]
+                Resource: "*"
+              - Effect: Allow
+                Action: [iam:PassRole]
+                Resource: [!GetAtt EtlExecutionRole.Arn, !GetAtt EtlTaskRole.Arn]
+              - Effect: Allow
+                Action: [quicksight:CreateIngestion, quicksight:DescribeIngestion]
+                Resource:
+                  - !Sub "arn:aws:quicksight:${AWS::Region}:${QuickSightAccountId}:dataset/${MainDataSetId}/ingestion/*"
+                  - !Sub "arn:aws:quicksight:${AWS::Region}:${QuickSightAccountId}:dataset/${RlsDataSetId}/ingestion/*"
+              - Effect: Allow
+                Action: [sns:Publish]
+                Resource: !Ref AlertTopic
+              - Effect: Allow
+                Action: [events:PutTargets, events:PutRule, events:DescribeRule]
+                Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule"
+
+  RefreshStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${ProjectName}-refresh"
+      RoleArn: !GetAtt StateMachineRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "ETL -> SPICE refresh with failure alerting",
+          "StartAt": "RunEtl",
+          "States": {
+            "RunEtl": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::ecs:runTask.sync",
+              "Parameters": {
+                "Cluster": "${EtlCluster.Arn}",
+                "TaskDefinition": "${EtlTaskDefinition}",
+                "LaunchType": "FARGATE",
+                "NetworkConfiguration": {
+                  "AwsvpcConfiguration": {
+                    "Subnets": ${PrivateSubnetIdsJson},
+                    "SecurityGroups": ["${EtlSecurityGroup.GroupId}"],
+                    "AssignPublicIp": "DISABLED"
+                  }
+                },
+                "Overrides": {
+                  "ContainerOverrides": [
+                    {"Name": "etl", "Command": ["python", "etl_transform.py", "--full"]}
+                  ]
+                }
+              },
+              "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "NotifyFailure"}],
+              "Next": "IngestRls"
+            },
+            "IngestRls": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:quicksight:createIngestion",
+              "Parameters": {
+                "AwsAccountId": "${QuickSightAccountId}",
+                "DataSetId": "${RlsDataSetId}",
+                "IngestionId.$": "States.Format('rls-{}', $$.Execution.Name)"
+              },
+              "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "NotifyFailure"}],
+              "Next": "IngestMain"
+            },
+            "IngestMain": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:quicksight:createIngestion",
+              "Parameters": {
+                "AwsAccountId": "${QuickSightAccountId}",
+                "DataSetId": "${MainDataSetId}",
+                "IngestionId.$": "States.Format('main-{}', $$.Execution.Name)"
+              },
+              "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "NotifyFailure"}],
+              "End": true
+            },
+            "NotifyFailure": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${AlertTopic}",
+                "Subject": "Suntech P&L dashboard refresh FAILED",
+                "Message.$": "States.Format('Refresh execution {} failed. Cause: {}', $$.Execution.Name, $.Cause)"
+              },
+              "Next": "FailState"
+            },
+            "FailState": {"Type": "Fail", "Error": "RefreshFailed"}
+          }
+        }
+
+  # ---------------------------------------------------------------------------
+  # EventBridge Scheduler: daily trigger (Dubai timezone) of the state machine.
+  # ---------------------------------------------------------------------------
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: scheduler.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-sfn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [states:StartExecution]
+                Resource: !Ref RefreshStateMachine
+
+  DailyRefreshSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${ProjectName}-daily-refresh"
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: !Ref ScheduleExpression
+      ScheduleExpressionTimezone: "Asia/Dubai"
+      Target:
+        Arn: !Ref RefreshStateMachine
+        RoleArn: !GetAtt SchedulerRole.Arn
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref RefreshStateMachine
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+  Note:
+    Value: >
+      Replace ${PrivateSubnetIdsJson} by rendering PrivateSubnetIds as a JSON
+      array before deploy (see scripts/render_subnets.sh), or convert this
+      template to CDK where list handling is native.

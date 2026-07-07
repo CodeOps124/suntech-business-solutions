@@ -1,0 +1,97 @@
+{
+  "_comment": "QuickSight DataSet for the P&L Invoice Analytics dashboard. Built on the reporting.v_invoice_detail view (NOT the raw fact table) so metric definitions live in one place. Import mode = SPICE so the daily Step Functions refresh calls CreateIngestion. RLS is attached via RowLevelPermissionDataSet pointing at the rls dataset (02_dataset_rls.json). Shape matches the input to: aws quicksight create-data-set.",
+  "AwsAccountId": "REPLACE_WITH_ACCOUNT_ID",
+  "DataSetId": "suntech-pnl-invoice-detail",
+  "Name": "Suntech P&L - Invoice Detail",
+  "ImportMode": "SPICE",
+  "PhysicalTableMap": {
+    "invoice-detail-physical": {
+      "CustomSql": {
+        "DataSourceArn": "arn:aws:quicksight:me-central-1:REPLACE_WITH_ACCOUNT_ID:datasource/suntech-reporting-postgres",
+        "Name": "v_invoice_detail",
+        "SqlQuery": "SELECT * FROM reporting.v_invoice_detail",
+        "Columns": [
+          {"Name": "invoice_key", "Type": "INTEGER"},
+          {"Name": "client_invoice_id", "Type": "STRING"},
+          {"Name": "tenant_id", "Type": "STRING"},
+          {"Name": "tenant_name", "Type": "STRING"},
+          {"Name": "group_account_id", "Type": "STRING"},
+          {"Name": "group_account_name", "Type": "STRING"},
+          {"Name": "integration_tier", "Type": "STRING"},
+          {"Name": "trn", "Type": "STRING"},
+          {"Name": "buyer_id", "Type": "STRING"},
+          {"Name": "buyer_name", "Type": "STRING"},
+          {"Name": "buyer_country", "Type": "STRING"},
+          {"Name": "is_peppol_registered", "Type": "BOOLEAN"},
+          {"Name": "channel_code", "Type": "STRING"},
+          {"Name": "channel_name", "Type": "STRING"},
+          {"Name": "direction", "Type": "STRING"},
+          {"Name": "status", "Type": "STRING"},
+          {"Name": "is_processed", "Type": "INTEGER"},
+          {"Name": "is_submitted", "Type": "INTEGER"},
+          {"Name": "is_transmitted", "Type": "INTEGER"},
+          {"Name": "is_failed", "Type": "INTEGER"},
+          {"Name": "value_aed", "Type": "DECIMAL"},
+          {"Name": "currency", "Type": "STRING"},
+          {"Name": "processed_value_aed", "Type": "DECIMAL"},
+          {"Name": "submitted_at", "Type": "DATETIME"},
+          {"Name": "transmitted_at", "Type": "DATETIME"},
+          {"Name": "acknowledged_at", "Type": "DATETIME"},
+          {"Name": "ttack_minutes", "Type": "INTEGER"},
+          {"Name": "error_code", "Type": "STRING"},
+          {"Name": "submitted_date", "Type": "DATETIME"},
+          {"Name": "submitted_year_month", "Type": "STRING"},
+          {"Name": "submitted_year", "Type": "INTEGER"},
+          {"Name": "submitted_quarter", "Type": "INTEGER"},
+          {"Name": "submitted_month_name", "Type": "STRING"}
+        ]
+      }
+    }
+  },
+  "LogicalTableMap": {
+    "invoice-detail-logical": {
+      "Alias": "InvoiceDetail",
+      "Source": {"PhysicalTableId": "invoice-detail-physical"},
+      "DataTransforms": [
+        {
+          "_comment": "Headline KPI: 'invoices processed' = count of FTA-acknowledged invoices (scope decision). is_processed is 1/0 per row; SUM = the count.",
+          "CreateColumnsOperation": {
+            "Columns": [
+              {
+                "ColumnName": "Status Label",
+                "ColumnId": "calc-status-label",
+                "Expression": "switch({status}, 'submitted','Submitted', 'validation_failed','Validation failed', 'transmitted','Transmitted', 'fta_acknowledged','FTA-acknowledged', 'rejected','Rejected', {status})"
+              },
+              {
+                "ColumnName": "Direction Label",
+                "ColumnId": "calc-direction-label",
+                "Expression": "ifelse({direction}='AR','AR (Sales / Outbound)','AP (Purchase / Inbound)')"
+              },
+              {
+                "ColumnName": "Interop Gap Flag",
+                "ColumnId": "calc-interop-gap",
+                "Expression": "ifelse({is_peppol_registered}=true,'Buyer on Peppol','Buyer NOT on Peppol')"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "RowLevelPermissionDataSet": {
+    "_comment": "Enforces RLS at the DATA layer (PROJECT_OVERVIEW.md security requirement). PermissionPolicy GRANT_ACCESS: a user sees only tenant_ids granted to them in the rls dataset; users absent from the rules table are governed by FormatVersion semantics below.",
+    "Arn": "arn:aws:quicksight:me-central-1:REPLACE_WITH_ACCOUNT_ID:dataset/suntech-pnl-rls-rules",
+    "PermissionPolicy": "GRANT_ACCESS",
+    "FormatVersion": "VERSION_1",
+    "Status": "ENABLED"
+  },
+  "DataSetUsageConfiguration": {
+    "DisableUseAsDirectQuerySource": false,
+    "DisableUseAsImportedSource": false
+  },
+  "Tags": [
+    {"Key": "project", "Value": "pnl-invoice-analytics"},
+    {"Key": "data-classification", "Value": "client-regulated"},
+    {"Key": "owner", "Value": "suntech-internal-pnl"}
+  ]
+}

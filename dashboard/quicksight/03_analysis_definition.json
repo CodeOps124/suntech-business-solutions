@@ -1,0 +1,432 @@
+{
+  "_comment": "QuickSight Analysis definition for the P&L Invoice Analytics dashboard. Shape matches the 'Definition' member of: aws quicksight create-analysis --definition file://... Four sheets per PROJECT_OVERVIEW.md 'Dashboard Pages': Executive overview, Tenant explorer, Operational health, Commercial. One shared filter bar (date range, tenant, AR/AP) implemented as cross-sheet filters in FilterGroups. Calculated fields encode the metric definitions (processed = FTA-acknowledged).",
+  "AwsAccountId": "REPLACE_WITH_ACCOUNT_ID",
+  "AnalysisId": "suntech-pnl-invoice-analytics",
+  "Name": "Suntech P&L - Invoice Analytics",
+  "Definition": {
+    "DataSetIdentifierDeclarations": [
+      {
+        "Identifier": "InvoiceDetail",
+        "DataSetArn": "arn:aws:quicksight:me-central-1:REPLACE_WITH_ACCOUNT_ID:dataset/suntech-pnl-invoice-detail"
+      }
+    ],
+
+    "CalculatedFields": [
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Invoices Processed",
+        "Expression": "sum({is_processed})"
+      },
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Invoices Submitted",
+        "Expression": "sum({is_submitted})"
+      },
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Invoices Transmitted",
+        "Expression": "sum({is_transmitted})"
+      },
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Invoices Failed",
+        "Expression": "sum({is_failed})"
+      },
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Processed Value (AED)",
+        "Expression": "sum({processed_value_aed})"
+      },
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Rejection Rate %",
+        "Expression": "ifelse(sum({is_submitted})=0, 0, sum({is_failed}) / sum({is_submitted}) * 100)"
+      },
+      {
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Avg Time-to-Acknowledge (min)",
+        "Expression": "avg({ttack_minutes})"
+      },
+      {
+        "_comment": "Period-over-period: processed in the comparison window. Used for the executive 'period change' card via PeriodOverPeriod on the date field.",
+        "DataSetIdentifier": "InvoiceDetail",
+        "Name": "Processed (prev period)",
+        "Expression": "periodOverPeriodLastValue(sum({is_processed}), {submitted_date}, MONTH, 1)"
+      }
+    ],
+
+    "FilterGroups": [
+      {
+        "_comment": "Shared global filter bar — date range. Scope = ALL_DATASETS, applied to every sheet so all pages move together (PROJECT_OVERVIEW.md 'All pages share one global filter bar').",
+        "FilterGroupId": "fg-global-date",
+        "CrossDataset": "ALL_DATASETS",
+        "Status": "ENABLED",
+        "Filters": [
+          {
+            "RelativeDatesFilter": {
+              "FilterId": "flt-date-range",
+              "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"},
+              "AnchorDateConfiguration": {"AnchorOption": "NOW"},
+              "TimeGranularity": "DAY",
+              "RelativeDateType": "LAST",
+              "RelativeDateValue": 90,
+              "NullOption": "NON_NULLS_ONLY"
+            }
+          }
+        ],
+        "ScopeConfiguration": {"AllSheets": {}}
+      },
+      {
+        "FilterGroupId": "fg-global-tenant",
+        "CrossDataset": "ALL_DATASETS",
+        "Status": "ENABLED",
+        "Filters": [
+          {
+            "CategoryFilter": {
+              "FilterId": "flt-tenant",
+              "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "tenant_name"},
+              "Configuration": {
+                "FilterListConfiguration": {"MatchOperator": "CONTAINS", "NullOption": "ALL_VALUES"}
+              }
+            }
+          }
+        ],
+        "ScopeConfiguration": {"AllSheets": {}}
+      },
+      {
+        "FilterGroupId": "fg-global-direction",
+        "CrossDataset": "ALL_DATASETS",
+        "Status": "ENABLED",
+        "Filters": [
+          {
+            "CategoryFilter": {
+              "FilterId": "flt-direction",
+              "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "Direction Label"},
+              "Configuration": {
+                "FilterListConfiguration": {"MatchOperator": "CONTAINS", "NullOption": "ALL_VALUES"}
+              }
+            }
+          }
+        ],
+        "ScopeConfiguration": {"AllSheets": {}}
+      }
+    ],
+
+    "Sheets": [
+      {
+        "SheetId": "sheet-exec",
+        "Name": "Executive Overview",
+        "_comment": "Landing page. KPI cards (processed, period change, processed value, avg TTAck), trend by status, tier breakdown, status breakdown, top tenants.",
+        "Visuals": [
+          {
+            "KPIVisual": {
+              "VisualId": "kpi-processed",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Invoices Processed (FTA-acknowledged)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "Values": [{"NumericalMeasureField": {"FieldId": "kpi-processed-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_processed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}],
+                  "TrendGroups": [{"DateDimensionField": {"FieldId": "kpi-processed-trend", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"}, "DateGranularity": "MONTH"}}]
+                },
+                "KPIOptions": {"Comparison": {"ComparisonMethod": "PERCENT_DIFFERENCE"}, "TrendArrows": {"Visibility": "VISIBLE"}}
+              }
+            }
+          },
+          {
+            "KPIVisual": {
+              "VisualId": "kpi-value",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed Value (AED)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "Values": [{"NumericalMeasureField": {"FieldId": "kpi-value-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "processed_value_aed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}],
+                  "TrendGroups": [{"DateDimensionField": {"FieldId": "kpi-value-trend", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"}, "DateGranularity": "MONTH"}}]
+                },
+                "KPIOptions": {"Comparison": {"ComparisonMethod": "PERCENT_DIFFERENCE"}, "TrendArrows": {"Visibility": "VISIBLE"}}
+              }
+            }
+          },
+          {
+            "KPIVisual": {
+              "VisualId": "kpi-ttack",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Avg Time-to-Acknowledge (min)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "Values": [{"NumericalMeasureField": {"FieldId": "kpi-ttack-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "ttack_minutes"}, "AggregationFunction": {"SimpleNumericalAggregation": "AVERAGE"}}}]
+                }
+              }
+            }
+          },
+          {
+            "KPIVisual": {
+              "VisualId": "kpi-rejection",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Rejection Rate %"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "Values": [{"NumericalMeasureField": {"FieldId": "kpi-rejection-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_failed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                }
+              }
+            }
+          },
+          {
+            "LineChartVisual": {
+              "VisualId": "line-trend-status",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Invoice Trend by Status"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "LineChartAggregatedFieldWells": {
+                    "Category": [{"DateDimensionField": {"FieldId": "trend-date", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"}, "DateGranularity": "WEEK"}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "trend-count", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "invoice_key"}, "AggregationFunction": {"SimpleNumericalAggregation": "COUNT"}}}],
+                    "Colors": [{"CategoricalDimensionField": {"FieldId": "trend-status", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "Status Label"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "bar-tier",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed Invoices by Integration Tier"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "tier-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "integration_tier"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "tier-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_processed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "PieChartVisual": {
+              "VisualId": "pie-status",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Status Breakdown"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "PieChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "status-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "Status Label"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "status-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "invoice_key"}, "AggregationFunction": {"SimpleNumericalAggregation": "COUNT"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "bar-top-tenants",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Top Tenants by Processed Volume"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "toptenant-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "tenant_name"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "toptenant-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_processed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                },
+                "Orientation": "HORIZONTAL",
+                "SortConfiguration": {"CategorySort": [{"FieldSort": {"FieldId": "toptenant-val", "Direction": "DESC"}}], "CategoryItemsLimit": {"ItemsLimit": 10}}
+              }
+            }
+          }
+        ]
+      },
+
+      {
+        "SheetId": "sheet-tenant",
+        "Name": "Tenant Explorer",
+        "_comment": "Answers 'invoices processed for the customers of PwC'. A tenant parameter control drives every visual; the buyer breakdown = that tenant's own buyers (Corner 4).",
+        "Visuals": [
+          {
+            "KPIVisual": {
+              "VisualId": "tx-kpi-processed",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed for Selected Tenant"}},
+              "ChartConfiguration": {
+                "FieldWells": {"Values": [{"NumericalMeasureField": {"FieldId": "tx-kpi-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_processed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]}
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "tx-buyers",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed Invoices by Buyer (this tenant's customers)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "tx-buyer-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "buyer_name"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "tx-buyer-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_processed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                },
+                "Orientation": "HORIZONTAL",
+                "SortConfiguration": {"CategorySort": [{"FieldSort": {"FieldId": "tx-buyer-val", "Direction": "DESC"}}]}
+              }
+            }
+          },
+          {
+            "PieChartVisual": {
+              "VisualId": "tx-arap",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "AR / AP Split"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "PieChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "tx-arap-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "Direction Label"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "tx-arap-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "invoice_key"}, "AggregationFunction": {"SimpleNumericalAggregation": "COUNT"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "LineChartVisual": {
+              "VisualId": "tx-trend",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "This Tenant's Processed Trend"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "LineChartAggregatedFieldWells": {
+                    "Category": [{"DateDimensionField": {"FieldId": "tx-trend-date", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"}, "DateGranularity": "WEEK"}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "tx-trend-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_processed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+
+      {
+        "SheetId": "sheet-ops",
+        "Name": "Operational Health",
+        "_comment": "Rejection-rate trend, error-code breakdown, TTAck distribution, channel-level error rates.",
+        "Visuals": [
+          {
+            "LineChartVisual": {
+              "VisualId": "ops-rejection-trend",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Rejection Rate % over Time"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "LineChartAggregatedFieldWells": {
+                    "Category": [{"DateDimensionField": {"FieldId": "ops-rej-date", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"}, "DateGranularity": "WEEK"}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "ops-rej-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_failed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "ops-error-codes",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Error Code Breakdown"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "ops-err-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "error_code"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "ops-err-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "invoice_key"}, "AggregationFunction": {"SimpleNumericalAggregation": "COUNT"}}}]
+                  }
+                },
+                "Orientation": "HORIZONTAL",
+                "SortConfiguration": {"CategorySort": [{"FieldSort": {"FieldId": "ops-err-val", "Direction": "DESC"}}]}
+              }
+            }
+          },
+          {
+            "HistogramVisual": {
+              "VisualId": "ops-ttack-dist",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Time-to-Acknowledge Distribution (min)"}},
+              "ChartConfiguration": {
+                "FieldWells": {"HistogramAggregatedFieldWells": {"Values": [{"NumericalMeasureField": {"FieldId": "ops-ttack-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "ttack_minutes"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]}}
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "ops-channel-errors",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Failures by Channel"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "ops-ch-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "channel_name"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "ops-ch-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_failed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "ops-interop-gap",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Failures: Buyer Not Yet on Peppol (interop gap)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "ops-gap-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "Interop Gap Flag"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "ops-gap-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "is_failed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+
+      {
+        "SheetId": "sheet-commercial",
+        "Name": "Commercial / Revenue",
+        "_comment": "CONDITIONAL per PROJECT_OVERVIEW.md: value visuals depend on billing/value data being accessible. value_aed is nullable; if it is entirely NULL these degrade to empty and the page should be hidden via the deploy flag (see docs). Revenue-by-tier, value-by-group, processed value trend.",
+        "Visuals": [
+          {
+            "BarChartVisual": {
+              "VisualId": "com-value-tier",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed Value by Integration Tier (AED)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "com-tier-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "integration_tier"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "com-tier-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "processed_value_aed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "BarChartVisual": {
+              "VisualId": "com-value-group",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed Value by Client Group (AED)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "BarChartAggregatedFieldWells": {
+                    "Category": [{"CategoricalDimensionField": {"FieldId": "com-grp-cat", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "group_account_name"}}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "com-grp-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "processed_value_aed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                },
+                "Orientation": "HORIZONTAL",
+                "SortConfiguration": {"CategorySort": [{"FieldSort": {"FieldId": "com-grp-val", "Direction": "DESC"}}]}
+              }
+            }
+          },
+          {
+            "LineChartVisual": {
+              "VisualId": "com-value-trend",
+              "Title": {"Visibility": "VISIBLE", "FormatText": {"PlainText": "Processed Value Trend (AED)"}},
+              "ChartConfiguration": {
+                "FieldWells": {
+                  "LineChartAggregatedFieldWells": {
+                    "Category": [{"DateDimensionField": {"FieldId": "com-trend-date", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "submitted_date"}, "DateGranularity": "MONTH"}}],
+                    "Values": [{"NumericalMeasureField": {"FieldId": "com-trend-val", "Column": {"DataSetIdentifier": "InvoiceDetail", "ColumnName": "processed_value_aed"}, "AggregationFunction": {"SimpleNumericalAggregation": "SUM"}}}]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+
+    "ParameterDeclarations": [
+      {
+        "StringParameterDeclaration": {
+          "Name": "pTenant",
+          "ParameterValueType": "MULTI_VALUED",
+          "_comment": "Drives the Tenant Explorer page. Bound to a dropdown control listing tenant_name values the logged-in user is allowed to see (RLS still applies underneath)."
+        }
+      }
+    ],
+
+    "Options": {"Timezone": "Asia/Dubai", "WeekStart": "SUNDAY"}
+  }
+}
