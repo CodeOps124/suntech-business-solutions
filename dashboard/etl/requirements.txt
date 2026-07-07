@@ -1,0 +1,5 @@
+# Pinned for reproducibility + vulnerability scanning (see SECURITY_CHECKLIST.md).
+# generate_sample_data.py uses only the stdlib and needs nothing here.
+# etl_transform.py (DB mode) needs these:
+psycopg2-binary==2.9.10
+boto3==1.40.0
