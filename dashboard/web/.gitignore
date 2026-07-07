@@ -1,0 +1,5 @@
+node_modules
+dist
+src/data/dataset.json
+.env
+.env.local

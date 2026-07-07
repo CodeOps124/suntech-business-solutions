@@ -1,0 +1,13 @@
+{
+  "name": "suntech-tca-embed-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Minimal backend that mints principal-scoped QuickSight embed URLs for the Suntech TCA frontend.",
+  "scripts": { "start": "node index.mjs" },
+  "dependencies": {
+    "@aws-sdk/client-quicksight": "^3.700.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
